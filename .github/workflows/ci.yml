@@ -1,0 +1,67 @@
+# Compila y corre las 105 pruebas en cada push y en cada pull request.
+#
+# Las pruebas necesitan un MySQL de verdad —el proyecto no usa H2, ver docs/decisiones.md—,
+# así que el trabajo levanta uno como servicio. La única condición es que quede escuchando en
+# el 3307 del runner, que es el puerto que espera el perfil `test`: así el mismo comando
+# funciona igual acá y en la máquina de cualquiera con docker-compose levantado.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    name: Compilar y probar
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - 3307:3306
+        # Sin esto el trabajo arranca antes de que MySQL acepte conexiones y las pruebas
+        # fallan con "Communications link failure", que parece una regresión y no lo es.
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Preparar Java 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: temurin
+          cache: maven
+
+      - name: Dar permiso de ejecución al wrapper
+        run: chmod +x ./mvnw
+
+      # verify corre las pruebas y, después, el informe de cobertura de JaCoCo.
+      - name: Compilar, probar y medir cobertura
+        run: ./mvnw -B verify
+
+      - name: Publicar el informe de cobertura
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cobertura-jacoco
+          path: target/site/jacoco
+          if-no-files-found: warn
+
+      # Los informes de Surefire dicen qué prueba falló. Sin esto, un fallo en CI obliga a
+      # reproducirlo a mano para saber cuál fue.
+      - name: Publicar los informes de las pruebas
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: informes-de-pruebas
+          path: target/surefire-reports

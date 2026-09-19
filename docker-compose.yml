@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  # ==========================================
+  # SERVICIO 1: La Base de Datos MySQL
+  # ==========================================
+  db:
+    image: mysql:8.0
+    container_name: zolea-mysql
+    environment:
+      MYSQL_DATABASE: zolea_db
+      MYSQL_ROOT_PASSWORD: root
+    ports:
+      # Exponemos el puerto 3307 en tu compu para que no choque con tu MySQL local
+      - "3307:3306"
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ==========================================
+  # SERVICIO 2: Tu Backend Spring Boot
+  # ==========================================
+  backend:
+    build: . # Le dice que cocine el Dockerfile que creamos antes
+    container_name: zolea-backend
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # El perfil "demo" ya sabe apuntar a db:3306 y cargar los datos de
+      # demostración. Ver src/main/resources/application-demo.properties.
+      SPRING_PROFILES_ACTIVE: demo
+      # Conexión a la base: valores FIJOS, no tomados del .env. Dentro de la red de
+      # Compose la base siempre es el servicio "db" en el puerto 3306, y la
+      # contraseña es la que este mismo archivo le da al contenedor unas líneas más
+      # arriba. Si esto saliera del .env, un MYSQL_URL apuntando a localhost —que es
+      # lo correcto para correr la app fuera de Docker— haría que el backend no
+      # encuentre la base al levantar en Compose.
+      MYSQL_URL: jdbc:mysql://db:3306/zolea_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      MYSQL_USER: root
+      MYSQL_PASSWORD: root
+      # Integraciones, desde tu archivo .env
+      MP_ACCESS_TOKEN: ${MP_ACCESS_TOKEN}
+      NGROK_BASE_URL: ${NGROK_BASE_URL}
+      FRONTEND_URL: ${FRONTEND_URL}
+      JWT_SECRET: ${JWT_SECRET}
+
+volumes:
+  # Esto guarda la info para que las reservas no se borren si apagás la compu
+  db_data:
